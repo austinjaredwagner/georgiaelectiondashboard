@@ -1014,9 +1014,10 @@ function initVoteMap(stats){
   }).addTo(m);
 }
 
-function initDetailMap(id,res,metric,candIdx,allowDrill=true){
+function initDetailMap(id,res,metric,candIdx,allowDrill=true,drillMapId=null){
   killMap(id);const el=document.getElementById(id);if(!el)return;
   const m=makeMap(id);
+  const _did=drillMapId||id;
   const cand=res.cands[candIdx]||res.cands[0];
   const vals={};
   for(const[cty,ct]of Object.entries(res.ctyTotals)){
@@ -1061,7 +1062,7 @@ function initDetailMap(id,res,metric,candIdx,allowDrill=true){
       const diff=b!==null&&p!==null?p-b:null;
       const ev=getEV(cty,'');const rem=ev?Math.max(0,(ev.Total||0)-v):null;
       l.bindTooltip(`<strong>${n} County</strong><br><em>${cand}</em><br>Votes: ${fmt(v)} (${pct(p)})`+(b!==null?`<br>Bench: ${pct(b)} | Diff: ${diff>=0?'+':''}${pct(diff,2)}`:'')+(rem!==null?`<br>Est. Rem: ${fmt(rem)}`:''),{sticky:true});
-      if(allowDrill)l.on('click',()=>{if(window._DR&&window._DR.hasPr)drillToPrecinctDetail(window._DR,detailMapMetric,detailMapCandIdx,cty);});
+      if(allowDrill)l.on('click',()=>{if(window._DR&&window._DR.hasPr)drillToPrecinctDetail(window._DR,metric,candIdx,cty,_did);});
     }
   }).addTo(m);
 }
@@ -1366,14 +1367,18 @@ function renderExpRemUI(r){
 function initCandTabMaps(r,candIdx){
   if(!r)return;
   const hasBM=!!benchmarks[r.name];
+  const hasPr=r.hasPr;
   if(hasBM){
-    initDetailMap('map-cand-'+candIdx+'-bench',r,'bench',candIdx,false);
-    updateCandMapLegend('map-cand-'+candIdx+'-bench-leg','bench');
+    const bmId='map-cand-'+candIdx+'-bench';
+    initDetailMap(bmId,r,'bench',candIdx,hasPr,bmId);
+    updateCandMapLegend(bmId+'-leg','bench');
   }
-  initDetailMap('map-cand-'+candIdx+'-pct',r,'pct',candIdx,false);
-  updateCandMapLegend('map-cand-'+candIdx+'-pct-leg','pct');
-  initDetailMap('map-cand-'+candIdx+'-votes',r,'votes',candIdx,false);
-  updateCandMapLegend('map-cand-'+candIdx+'-votes-leg','votes');
+  const pctId='map-cand-'+candIdx+'-pct';
+  initDetailMap(pctId,r,'pct',candIdx,hasPr,pctId);
+  updateCandMapLegend(pctId+'-leg','pct');
+  const votesId='map-cand-'+candIdx+'-votes';
+  initDetailMap(votesId,r,'votes',candIdx,hasPr,votesId);
+  updateCandMapLegend(votesId+'-leg','votes');
 }
 function initExpRemDetailMap(r){
   const id='map-exprem-detail';
@@ -1662,8 +1667,8 @@ async function getPrecinctGeo(){
   for(const f of GA_PREC_GEO.features){const cfp=f.properties.COUNTY;if(!precGeoByCounty[cfp])precGeoByCounty[cfp]=[];precGeoByCounty[cfp].push(f);}
   return GA_PREC_GEO;
 }
-async function drillToPrecinctDetail(r,metric,candIdx,ctyName){
-  const id1='map-d1';const m1=maps[id1];if(!m1)return;
+async function drillToPrecinctDetail(r,metric,candIdx,ctyName,mapId='map-d1'){
+  const id1=mapId;const m1=maps[id1];if(!m1)return;
   try{await getPrecinctGeo();}catch(e){toast('Could not load precinct data: '+e.message,true);return;}
   const ctyFeat=GA_GEO.features.find(f=>(f.properties.NAME+' County')===ctyName||f.properties.NAME===ctyName);
   if(!ctyFeat)return;
@@ -1725,10 +1730,20 @@ async function drillToPrecinctDetail(r,metric,candIdx,ctyName){
     }
   }).addTo(m1);
   m1.fitBounds(precLayer.getBounds(),{padding:[10,10]});
-  detailDrillCty=ctyName;
-  const card=document.getElementById('map-d1')?.closest('.map-card');
-  if(card){const title=card.querySelector('.map-title');if(title)title.innerHTML=`<button onclick="resetToDetailCountyView(window._DR)" style="background:none;border:none;cursor:pointer;color:var(--primary);font-size:12px;padding:0 6px 0 0">← Counties</button>${ctyName} Precincts`;}
-  const leg=document.getElementById('map-d1-legend');
+  if(mapId==='map-d1')detailDrillCty=ctyName;
+  const card=document.getElementById(mapId)?.closest('.map-card');
+  if(card){
+    const title=card.querySelector('.map-title');
+    if(title){
+      if(!title.dataset.origTitle)title.dataset.origTitle=title.innerHTML;
+      const resetCall=mapId==='map-d1'
+        ?`resetToDetailCountyView(window._DR)`
+        :`resetCandMapToCountyView(window._DR,'${mapId}','${metric}',${candIdx})`;
+      title.innerHTML=`<button onclick="${resetCall}" style="background:none;border:none;cursor:pointer;color:var(--primary);font-size:12px;padding:0 6px 0 0">← Counties</button>${ctyName} Precincts`;
+    }
+  }
+  const legId=mapId==='map-d1'?'map-d1-legend':mapId+'-leg';
+  const leg=document.getElementById(legId);
   if(leg){const matched=Object.keys(geoidData).length;const total=pRows.length;leg.innerHTML+=`<span style="font-size:10px;color:var(--muted);margin-left:8px">${matched}/${total} matched</span>`;}
 }
 function resetToDetailCountyView(r){
@@ -1736,6 +1751,13 @@ function resetToDetailCountyView(r){
   initDetailMap('map-d1',r,detailMapMetric,detailMapCandIdx);
   updateMapD1Legend(detailMapMetric);
   const t1=document.getElementById('map-d1-title');if(t1)t1.innerHTML='County Results'+(r.hasPr?' <span style="font-size:10px;color:var(--muted);font-weight:400">· Click county for precinct view</span>':'');
+}
+function resetCandMapToCountyView(r,mapId,metric,candIdx){
+  if(!r)return;
+  initDetailMap(mapId,r,metric,candIdx,r.hasPr,mapId);
+  updateCandMapLegend(mapId+'-leg',metric);
+  const card=document.getElementById(mapId)?.closest('.map-card');
+  if(card){const title=card.querySelector('.map-title');if(title&&title.dataset.origTitle){title.innerHTML=title.dataset.origTitle;delete title.dataset.origTitle;}}
 }
 
 async function drillToPrecincts(r,cname,ctyName){
