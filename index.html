@@ -195,6 +195,35 @@ table.dt th.sort-desc::after{content:' ▼';font-size:8px;}
 #feat-search-drop .drop-item:hover{background:#f0f4f8;}
 #feat-search-drop .drop-item:last-child{border-bottom:none;}
 
+/* Main dashboard tabs */
+.main-tabs{display:flex;gap:2px;border-bottom:3px solid var(--border);margin-bottom:var(--gap);}
+.main-tab{padding:10px 22px;font-size:13px;font-weight:700;color:var(--muted);cursor:pointer;border-bottom:3px solid transparent;margin-bottom:-3px;transition:color .15s;}
+.main-tab:hover{color:var(--text);}
+.main-tab.active{color:var(--header);border-bottom-color:var(--header);}
+.main-tab-pane{display:none;} .main-tab-pane.active{display:block;}
+/* Sub-tabs inside contest list */
+.ct-subtabs{display:flex;gap:2px;border-bottom:1px solid var(--border);padding:8px 14px 0;background:#fafbfc;}
+.ct-subtab{padding:6px 14px;font-size:11px;font-weight:600;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px;}
+.ct-subtab.active{color:var(--header);border-bottom-color:var(--header);}
+/* Featured card redesign: map left + bar right */
+.feat-card-body{display:flex;min-height:190px;}
+.feat-card-map{flex:1;border-right:1px solid var(--border);min-height:190px;max-width:200px;}
+.feat-card-bars{flex:2;padding:12px 14px;display:flex;flex-direction:column;justify-content:center;}
+.feat-cand-row{display:flex;align-items:center;gap:6px;margin-bottom:8px;}
+.feat-cand-row:last-child{margin-bottom:0;}
+.feat-cand-name{font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;width:100px;min-width:80px;}
+.feat-cand-bar-wrap{flex:1;}
+.feat-cand-bar{height:16px;border-radius:3px;background:#e5e7eb;overflow:hidden;position:relative;}
+.feat-cand-bar-fill{height:100%;border-radius:3px;transition:width .5s;display:flex;align-items:center;padding-left:4px;}
+.feat-cand-pct{font-size:11px;font-weight:700;min-width:36px;text-align:right;color:var(--muted);}
+.feat-cand-votes{font-size:10px;color:var(--muted);min-width:52px;text-align:right;}
+/* By-county contest list */
+.county-group-hdr{padding:8px 14px;background:#f0f4f8;font-size:11px;font-weight:700;color:var(--header);border-bottom:1px solid var(--border);cursor:pointer;display:flex;align-items:center;gap:6px;}
+.county-group-hdr:hover{background:#e8eff7;}
+.county-group-body{display:none;}
+.county-group-body.open{display:block;}
+.county-contest-row{padding:7px 20px;border-bottom:1px solid #f3f4f6;display:flex;align-items:center;gap:10px;cursor:pointer;font-size:12px;}
+.county-contest-row:hover{background:#f8fafc;}
 /* Toast / loader */
 .loader{position:fixed;inset:0;background:rgba(255,255,255,0.87);z-index:800;display:none;align-items:center;justify-content:center;gap:12px;font-size:13px;font-weight:600;color:var(--header);}
 .spinner{width:22px;height:22px;border:3px solid rgba(26,58,92,0.2);border-top-color:var(--header);border-radius:50%;animation:spin .7s linear infinite;}
@@ -306,6 +335,9 @@ let eData = null;        // raw election JSON
 let pData = null;        // processed: {contests[], stateStats, contestSummaries{}}
 let benchmarks = loadLS('ga_bm',{});
 let expVotes = loadLS('ga_ev',{});
+let expVotesDem = loadLS('ga_ev_dem',{});    // expected votes for Democratic primary contests
+let expVotesRep = loadLS('ga_ev_rep',{});    // expected votes for Republican primary contests
+let expVotesNp  = loadLS('ga_ev_np',{});     // expected votes for Non-Partisan contests
 let lastUpdated = null;
 let lastEtag = null;
 let refreshTimer = null;
@@ -322,6 +354,8 @@ let ctFilter = 'statewide';
 let ctPage = 0;
 const CT_PAGE_SIZE = 100;
 let detailTab = 'table';
+let mainTab = 'turnout';        // 'turnout' | 'contests'
+let contestsListTab = 'all';    // 'all' | 'bycounty'
 let adminTab = 'election';
 let adminCtSearch = '';
 let adminExpanded = new Set();
@@ -353,6 +387,7 @@ function saveLS(key,val){localStorage.setItem(key,JSON.stringify(val));}
 // ============================================================
 function normGroup(n){return n?VG_ALIAS[n.trim().toLowerCase()]||null:null;}
 function normCounty(n){return n?n.replace(/ County$/i,'').trim():'';}
+function isReported(status){return status==='Fully Reported'||status==='Election Night Complete';}
 
 // Normalize bilingual contest names so Gwinnett's Spanish-suffixed names match
 // other counties' English-only names.  Three patterns handled:
@@ -503,7 +538,7 @@ function getResults(contestName){
   for(const row of rows){
     if(!ctyTotals[row.co])ctyTotals[row.co]={tp:0,rp:0,c:{}};
     const ct=ctyTotals[row.co];ct.tp++;
-    if(row.status==='Fully Reported')ct.rp++;
+    if(isReported(row.status))ct.rp++;
     for(const[cand,v]of Object.entries(row.c)){
       if(!ct.c[cand])ct.c[cand]={};
       for(const[k,n]of Object.entries(v))ct.c[cand][k]=(ct.c[cand][k]||0)+n;
@@ -565,7 +600,7 @@ function precomputeSummaries(data,contests){
       const firstOpt=(bi.ballotOptions||[])[0];
       if(firstOpt&&(firstOpt.precinctResults||[]).length>0){
         for(const pr of(firstOpt.precinctResults||[])){
-          s.tp++;if(pr.reportingStatus==='Fully Reported')s.rp++;
+          s.tp++;if(isReported(pr.reportingStatus))s.rp++;
         }
       }
     }
@@ -594,7 +629,7 @@ function getCountyStats(data){
           for(const bo of(bi.ballotOptions||[]))
             for(const pr of(bo.precinctResults||[])){
               const pid=pr.id||pr.name||'';
-              if(!seen.has(pid)){seen.add(pid);s.tp++;if(pr.reportingStatus==='Fully Reported')s.rp++;}
+              if(!seen.has(pid)){seen.add(pid);s.tp++;if(isReported(pr.reportingStatus))s.rp++;}
             }
           foundPrecinct=true;s.hasPrecinct=true;
         }
@@ -713,11 +748,27 @@ function parseEV(text){
   return r;
 }
 
-function getEV(county,precinct){
-  if(!expVotes)return null;
+// Determine which expected-votes set applies to a contest name.
+// Returns the expVotes object (general/dem/rep/np) or null if none loaded.
+function getEVSet(contestName){
+  const cn=contestName||'';
+  const isDem=/- Dem\s*$/i.test(cn)||/\bDemocratic\b/i.test(cn);
+  const isRep=/- Rep\s*$/i.test(cn)||/\bRepublican\b/i.test(cn);
+  if(isDem&&expVotesDem&&Object.keys(expVotesDem.county||{}).length)return expVotesDem;
+  if(isRep&&expVotesRep&&Object.keys(expVotesRep.county||{}).length)return expVotesRep;
+  // Non-Partisan: any contest not clearly Dem/Rep
+  if(!isDem&&!isRep&&expVotesNp&&Object.keys(expVotesNp.county||{}).length)return expVotesNp;
+  // Fall back to legacy general set
+  if(expVotes&&Object.keys(expVotes.county||{}).length)return expVotes;
+  return null;
+}
+
+function getEV(county,precinct,contestName){
+  const ev=contestName?getEVSet(contestName):expVotes;
+  if(!ev)return null;
   const cn=normCounty(county);
-  if(precinct&&expVotes.precinct&&expVotes.precinct[cn]&&expVotes.precinct[cn][precinct])return expVotes.precinct[cn][precinct];
-  if(expVotes.county&&expVotes.county[cn])return expVotes.county[cn];
+  if(precinct&&ev.precinct&&ev.precinct[cn]&&ev.precinct[cn][precinct])return ev.precinct[cn][precinct];
+  if(ev.county&&ev.county[cn])return ev.county[cn];
   return null;
 }
 
@@ -778,7 +829,10 @@ function fmt(n){return(n||0).toLocaleString();}
 function pct(p,d){return p===null||isNaN(p)?'—':((p*100).toFixed(d!==undefined?d:1))+'%';}
 function updateHeader(){
   const el=document.getElementById('hdr-updated');
-  if(lastUpdated)el.textContent='Updated '+lastUpdated.toLocaleTimeString();
+  let hdrTxt='';
+  if(lastUpdated)hdrTxt='Updated '+lastUpdated.toLocaleTimeString();
+  if(eData?.createdAt){try{const ed=new Date(eData.createdAt);hdrTxt+=(hdrTxt?' · ':'')+' Export: '+ed.toLocaleString();}catch(e){}}
+  if(hdrTxt)el.textContent=hdrTxt;
   if(eData){
     document.getElementById('hdr-title').textContent=cfg.electionLabel||eData.electionName||'Georgia Elections';
     document.getElementById('hdr-sub').textContent=(eData.electionDate||'')+' — '+((eData.localResults||[]).length)+' counties';
@@ -818,6 +872,19 @@ function navigateTo(v,param){
 // ============================================================
 // MAIN VIEW
 // ============================================================
+function switchMainTab(tab){
+  mainTab=tab;
+  document.querySelectorAll('.main-tab').forEach(t=>t.classList.toggle('active',t.dataset.mt===tab));
+  document.querySelectorAll('.main-tab-pane').forEach(p=>p.classList.toggle('active',p.dataset.mt===tab));
+  if(tab==='contests'){
+    // Init featured mini maps and contest table the first time the tab is shown
+    setTimeout(()=>{renderCT();renderCTByCounty();initFeatMiniMaps();},30);
+  } else if(tab==='turnout'){
+    // Leaflet maps may have been init'd in a hidden container — force resize
+    setTimeout(()=>['map-rep','map-votes','map-exprem'].forEach(id=>{if(maps[id])maps[id].invalidateSize();}),50);
+  }
+}
+
 function renderMain(){
   const el=document.getElementById('view-main');
   if(!eData||!pData){showNoData();return;}
@@ -828,41 +895,73 @@ function renderMain(){
   const repPct=tp>0?rp/tp:0;
 
   el.innerHTML=`
-    ${renderKPIs(rp,tp,repPct,total,Object.keys(stateStats).length)}
-    <div class="maps-row-3">
-      <div class="map-card"><div class="map-title" id="map-rep-title">📍 Precincts Reporting by County</div>
-        <div class="map-container" id="map-rep"></div>
-        <div class="map-legend-bar"><span>0%</span><div class="grad" style="background:linear-gradient(to right,#e5f5f0,#006d2c)"></div><span>100%</span></div>
-        <div id="prec-panel-rep" style="display:none;border-top:1px solid var(--border)"></div>
-      </div>
-      <div class="map-card"><div class="map-title" id="map-votes-title">🗳️ Total Votes by County</div>
-        <div class="map-container" id="map-votes"></div>
-        <div class="map-legend-bar"><span>Low</span><div class="grad" style="background:linear-gradient(to right,#deebf7,#084594)"></div><span>High</span></div>
-        <div id="prec-panel-votes" style="display:none;border-top:1px solid var(--border)"></div>
-      </div>
-      <div class="map-card"><div class="map-title" id="map-exprem-title">📥 Est. Votes Remaining by County</div>
-        <div class="map-container" id="map-exprem"></div>
-        <div class="map-legend-bar"><span>Low</span><div class="grad" style="background:linear-gradient(to right,#fef3c7,#b45309)"></div><span>High</span></div>
-        <div id="ev-prec-panel-main" style="display:none;border-top:1px solid var(--border)"></div>
+    <div class="main-tabs">
+      <div class="main-tab ${mainTab==='turnout'?'active':''}" data-mt="turnout" onclick="switchMainTab('turnout')">📊 Statewide Turnout</div>
+      <div class="main-tab ${mainTab==='contests'?'active':''}" data-mt="contests" onclick="switchMainTab('contests')">🗳️ Contests</div>
+    </div>
+
+    <div class="main-tab-pane ${mainTab==='turnout'?'active':''}" data-mt="turnout">
+      ${renderKPIs(rp,tp,repPct,total,Object.keys(stateStats).length)}
+      <div class="maps-row-3">
+        <div class="map-card"><div class="map-title" id="map-rep-title">📍 Precincts Reporting by County</div>
+          <div class="map-container" id="map-rep"></div>
+          <div class="map-legend-bar"><span>0%</span><div class="grad" style="background:linear-gradient(to right,#e5f5f0,#006d2c)"></div><span>100%</span></div>
+          <div id="prec-panel-rep" style="display:none;border-top:1px solid var(--border)"></div>
+        </div>
+        <div class="map-card"><div class="map-title" id="map-votes-title">🗳️ Total Votes by County</div>
+          <div class="map-container" id="map-votes"></div>
+          <div class="map-legend-bar"><span>Low</span><div class="grad" style="background:linear-gradient(to right,#deebf7,#084594)"></div><span>High</span></div>
+          <div id="prec-panel-votes" style="display:none;border-top:1px solid var(--border)"></div>
+        </div>
+        <div class="map-card"><div class="map-title" id="map-exprem-title">📥 Est. Votes Remaining by County</div>
+          <div class="map-container" id="map-exprem"></div>
+          <div class="map-legend-bar"><span>Low</span><div class="grad" style="background:linear-gradient(to right,#fef3c7,#b45309)"></div><span>High</span></div>
+          <div id="ev-prec-panel-main" style="display:none;border-top:1px solid var(--border)"></div>
+        </div>
       </div>
     </div>
-    <div class="section-label">⭐ Featured Races</div>
-    <div class="featured-grid" id="feat-grid">${renderFeaturedRaces()}</div>
-    <div class="section-label">📋 All Contests (${pData.contests.length})</div>
-    <div class="contests-card">
-      <div class="contests-toolbar">
-        <input class="search-input" type="search" placeholder="Search contests…" id="ct-search" value="${ctSearch}" oninput="ctSearch=this.value;ctPage=0;renderCT()">
-        <select class="filter-select" id="ct-filter" onchange="ctFilter=this.value;ctPage=0;renderCT()">
-          <option value="statewide" ${ctFilter==='statewide'?'selected':''}>Statewide only</option>
-          <option value="all" ${ctFilter==='all'?'selected':''}>All contests</option>
-          <option value="local" ${ctFilter==='local'?'selected':''}>Local only</option>
-        </select>
-        <span id="ct-count" style="font-size:11px;color:var(--muted)"></span>
+
+    <div class="main-tab-pane ${mainTab==='contests'?'active':''}" data-mt="contests">
+      <div class="section-label">⭐ Featured Races</div>
+      <div class="featured-grid" id="feat-grid">${renderFeaturedRaces()}</div>
+      <div class="section-label" style="margin-top:var(--gap)">📋 All Contests (${pData.contests.length})</div>
+      <div class="contests-card">
+        <div class="ct-subtabs">
+          <div class="ct-subtab ${contestsListTab==='all'?'active':''}" data-ctst="all" onclick="switchContestsListTab('all')">All Contests</div>
+          <div class="ct-subtab ${contestsListTab==='bycounty'?'active':''}" data-ctst="bycounty" onclick="switchContestsListTab('bycounty')">By County</div>
+        </div>
+        <div id="ct-all-panel" style="${contestsListTab!=='all'?'display:none':''}">
+          <div class="contests-toolbar">
+            <input class="search-input" type="search" placeholder="Search contests…" id="ct-search" value="${ctSearch}" oninput="ctSearch=this.value;ctPage=0;renderCT()">
+            <select class="filter-select" id="ct-filter" onchange="ctFilter=this.value;ctPage=0;renderCT()">
+              <option value="statewide" ${ctFilter==='statewide'?'selected':''}>Statewide only</option>
+              <option value="all" ${ctFilter==='all'?'selected':''}>All contests</option>
+              <option value="local" ${ctFilter==='local'?'selected':''}>Local only</option>
+            </select>
+            <span id="ct-count" style="font-size:11px;color:var(--muted)"></span>
+          </div>
+          <div id="ct-table"></div>
+        </div>
+        <div id="ct-bycounty-panel" style="${contestsListTab!=='bycounty'?'display:none':''}">
+          <div id="ct-bycounty-content"></div>
+        </div>
       </div>
-      <div id="ct-table"></div>
     </div>`;
 
-  setTimeout(()=>{initRepMap(stateStats);initVoteMap(stateStats);initExpRemMap(stateStats);renderCT();initFeatMiniMaps();},30);
+  setTimeout(()=>{
+    initRepMap(stateStats);initVoteMap(stateStats);initExpRemMap(stateStats);
+    if(mainTab==='contests'){renderCT();renderCTByCounty();initFeatMiniMaps();}
+  },30);
+}
+
+function switchContestsListTab(tab){
+  contestsListTab=tab;
+  document.querySelectorAll('.ct-subtab').forEach(t=>t.classList.toggle('active',t.dataset.ctst===tab));
+  const ap=document.getElementById('ct-all-panel');const bp=document.getElementById('ct-bycounty-panel');
+  if(ap)ap.style.display=tab==='all'?'':'none';
+  if(bp)bp.style.display=tab==='bycounty'?'':'none';
+  if(tab==='all')renderCT();
+  else renderCTByCounty();
 }
 
 function renderKPIs(rp,tp,repPct,total,counties){
@@ -881,14 +980,21 @@ function renderFeaturedRaces(){
     const tot=sumCands(r.st.c);
     const repPct=r.st.tp>0?r.st.rp/r.st.tp:0;
     const sorted=[...r.cands].sort((a,b)=>(r.st.c[b]?.Total||0)-(r.st.c[a]?.Total||0));
-    const candHtml=sorted.slice(0,4).map((c,i)=>{
+    // Bar chart for the right 2/3 (vote totals per candidate)
+    const candHtml=sorted.slice(0,5).map((c,i)=>{
       const v=r.st.c[c]?.Total||0;const p=tot>0?v/tot:0;
       const col=getCandColor(c,i,cname);
-      return`<div class="cand-row">
-        <div class="cand-name" title="${c}">${c}</div>
-        <div class="cand-bar-wrap"><div class="cand-bar"><div class="cand-bar-fill" style="width:${(p*100).toFixed(1)}%;background:${col}"></div></div></div>
-        <div class="cand-pct" style="color:${col}">${pct(p)}</div>
-        <div class="cand-votes">${fmt(v)}</div>
+      return`<div class="feat-cand-row">
+        <div class="feat-cand-name" title="${c}">${c}</div>
+        <div class="feat-cand-bar-wrap">
+          <div class="feat-cand-bar">
+            <div class="feat-cand-bar-fill" style="width:${(p*100).toFixed(1)}%;background:${col}">
+              ${p>0.12?`<span style="font-size:9px;color:#fff;font-weight:700;padding-left:3px">${pct(p)}</span>`:''}
+            </div>
+          </div>
+        </div>
+        <div class="feat-cand-pct" style="color:${col}">${p<=0.12?pct(p):''}</div>
+        <div class="feat-cand-votes">${fmt(v)}</div>
       </div>`;
     }).join('');
     const safe=encodeURIComponent(cname);
@@ -896,9 +1002,9 @@ function renderFeaturedRaces(){
       <div class="race-header"><h4 title="${cname}">${cname}</h4>
         <div class="race-meta">${(repPct*100).toFixed(0)}% precincts · ${fmt(tot)} votes</div>
       </div>
-      <div class="race-body">${candHtml}</div>
-      <div style="margin:6px 0 0;border-top:1px solid var(--border);padding-top:2px">
-        <div id="mini-h2h-${fi}" style="height:160px"></div>
+      <div class="feat-card-body">
+        <div class="feat-card-map" id="mini-h2h-${fi}"></div>
+        <div class="feat-card-bars">${candHtml}</div>
       </div>
       <div class="race-footer"><span>${r.st.rp}/${r.st.tp} precincts</span><a onclick="event.stopPropagation();navigateTo('detail','${safe}')">Full Analysis →</a></div>
     </div>`;
@@ -910,6 +1016,7 @@ function initFeatMiniMaps(){
     const el=document.getElementById('mini-h2h-'+fi);if(!el)return;
     const r=getResults(cname);if(!r)return;
     const id='mini-h2h-'+fi;killMap(id);
+    // Map fills the container div (no fixed height needed — CSS .feat-card-map sets min-height)
     const m=L.map(id,{zoomControl:false,attributionControl:false,scrollWheelZoom:false,dragging:false,touchZoom:false,doubleClickZoom:false,keyboard:false});
     maps[id]=m;m.fitBounds([[30.36,-85.61],[35.00,-80.84]]);
     const sorted=[...r.cands].sort((a,b)=>(r.st.c[b]?.Total||0)-(r.st.c[a]?.Total||0));
@@ -933,6 +1040,8 @@ function initFeatMiniMaps(){
         if(leader)l.bindTooltip(`<strong>${n}</strong><br>${leader}: ${pct(tot2>0?leaderV/tot2:0)}`,{sticky:true});
       }
     }).addTo(m);
+    // Zoom to the contest's relevant counties (not all of Georgia)
+    setTimeout(()=>zoomDetailMapToContest(id,cname,false),120);
   });
 }
 
@@ -978,22 +1087,173 @@ function renderCT(){
 }
 function setSort(col){if(sortCol===col)sortDir=sortDir==='asc'?'desc':'asc';else{sortCol=col;sortDir='asc';}renderCT();}
 
+// ---- By-County contest list ----
+let byCountyOpen = new Set();
+function toggleCountyGroup(enc){
+  const county=decodeURIComponent(enc);
+  if(byCountyOpen.has(county))byCountyOpen.delete(county);else byCountyOpen.add(county);
+  renderCTByCounty();
+}
+function renderCTByCounty(){
+  const wrap=document.getElementById('ct-bycounty-content');if(!wrap||!pData)return;
+  // Build a map: county -> [contests]
+  const byCounty={};
+  for(const c of pData.contests){
+    for(const cty of(c.counties||[])){
+      if(!byCounty[cty])byCounty[cty]=[];
+      byCounty[cty].push(c);
+    }
+  }
+  const sortedCounties=Object.keys(byCounty).sort();
+  const html=sortedCounties.map(cty=>{
+    const contests=byCounty[cty];
+    const isOpen=byCountyOpen.has(cty);
+    const rows=contests.map(c=>{
+      const s=pData.summaries[c.name]||{};
+      const repP=s.tp>0?s.rp/s.tp:0;
+      const safe=encodeURIComponent(c.name);
+      const leadHtml=s.lead?`<span style="color:${COLORS[0]};font-weight:600;font-size:11px">${shortName(s.lead)} ${pct(s.leadPct)}</span>`:'<span style="color:var(--muted);font-size:11px">—</span>';
+      return`<div class="county-contest-row" onclick="navigateTo('detail','${safe}')">
+        <div style="flex:1;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${c.name}">${c.name}</div>
+        <div style="min-width:110px">${leadHtml}</div>
+        <div style="min-width:80px;font-size:10px;color:var(--muted)">${(repP*100).toFixed(0)}% reported</div>
+        <div style="min-width:70px;text-align:right;font-size:11px;font-weight:600">${fmt(s.total||0)}</div>
+        <div style="color:var(--header);font-size:11px;padding-left:8px">View →</div>
+      </div>`;
+    }).join('');
+    const norm=cty.replace(/ County$/i,'');
+    return`<div>
+      <div class="county-group-hdr" onclick="toggleCountyGroup('${encodeURIComponent(cty)}')">
+        <span>${isOpen?'▼':'▶'}</span>
+        <span>${norm} County</span>
+        <span style="margin-left:auto;font-weight:400;color:var(--muted)">${contests.length} contest${contests.length!==1?'s':''}</span>
+      </div>
+      <div class="county-group-body ${isOpen?'open':''}">${rows}</div>
+    </div>`;
+  }).join('');
+  wrap.innerHTML=html||'<div style="padding:20px;text-align:center;color:var(--muted)">No contest data</div>';
+}
+
 // ============================================================
 // MAPS
 // ============================================================
 function killMap(id){if(maps[id]){maps[id].remove();delete maps[id];}}
 function makeMap(id){killMap(id);const m=L.map(id,{zoomControl:false,attributionControl:false});maps[id]=m;m.fitBounds([[30.36,-85.61],[35.00,-80.84]]);return m;}
 
+// -----------------------------------------------------------------------
+// Zoom a detail map to the contest's relevant counties.
+// - statewide contests: keep full GA bounds (no-op)
+// - multi-county: fitBounds of those county features
+// - single county: fitBounds of that county; optionally auto-drill precincts
+// -----------------------------------------------------------------------
+function zoomDetailMapToContest(mapId, contestName, autodrillIfSingleCounty){
+  const m=maps[mapId];if(!m||!GA_GEO)return;
+  const r=getResults(contestName);if(!r)return;
+  // Get county names that have data in this contest
+  const contestCounties=Object.keys(r.ctyTotals).filter(cty=>sumCands(r.ctyTotals[cty].c)>0||r.ctyTotals[cty].tp>0);
+  if(!contestCounties.length)return;
+  // If the contest covers essentially all GA counties treat as statewide — don't re-zoom
+  if(contestCounties.length>=100)return;
+  // Collect matching features
+  const feats=GA_GEO.features.filter(f=>{
+    const fn=f.properties.NAME;
+    return contestCounties.some(c=>c===fn+' County'||c===fn||normCounty(c)===fn);
+  });
+  if(!feats.length)return;
+  // Build a bounds encompassing all matching features
+  let bounds=null;
+  for(const f of feats){
+    const layer=L.geoJSON(f);
+    const b=layer.getBounds();
+    bounds=bounds?bounds.extend(b):b;
+  }
+  if(bounds)m.fitBounds(bounds,{padding:[24,24]});
+  // Auto-drill into precincts for single-county contests
+  if(autodrillIfSingleCounty&&contestCounties.length===1&&r.hasPr){
+    const cty=contestCounties[0];
+    setTimeout(()=>drillToPrecincts(r,contestName,cty),300);
+  }
+}
+
+// Zoom a statewide map to a county's bounding box and show a reset button
+function zoomMapToCounty(mapId,layer,titleId,originalTitle){
+  const m=maps[mapId];if(!m)return;
+  m.flyToBounds(layer.getBounds(),{padding:[20,20],duration:0.5});
+  const t=document.getElementById(titleId);
+  if(t&&!t.dataset.origHtml){
+    t.dataset.origHtml=t.innerHTML;
+    t.innerHTML=t.dataset.origHtml+` <button onclick="resetStatewideMap('${mapId}','${titleId}')" style="margin-left:8px;background:none;border:1px solid var(--border);border-radius:3px;padding:1px 7px;font-size:10px;cursor:pointer;color:var(--header)">← Back to State</button>`;
+  }
+}
+function resetStatewideMap(mapId,titleId){
+  const t=document.getElementById(titleId);
+  if(t&&t.dataset.origHtml){t.innerHTML=t.dataset.origHtml;delete t.dataset.origHtml;}
+  // Re-init the county layer (drillStatewideMapToPrecincts removes all layers)
+  if(!pData)return;
+  const{stateStats}=pData;
+  if(mapId==='map-rep')initRepMap(stateStats);
+  else if(mapId==='map-votes')initVoteMap(stateStats);
+  else if(mapId==='map-exprem')initExpRemMap(stateStats);
+}
+
+// Drill a statewide map to precinct-level view for a specific county.
+// mode: 'reporting' (green=reported) | 'votes' (blue gradient by total votes)
+async function drillStatewideMapToPrecincts(mapId,ctyName,titleId,mode){
+  const m=maps[mapId];if(!m||!GA_GEO)return;
+  toast('Loading precinct boundaries…');
+  try{await getPrecinctGeo();}catch(e){toast('Could not load precinct data: '+e.message,true);return;}
+  const ctyFeat=GA_GEO.features.find(f=>(f.properties.NAME+' County')===ctyName||f.properties.NAME===ctyName);
+  if(!ctyFeat){toast('County not found: '+ctyName,true);return;}
+  const cfp=ctyFeat.properties.COUNTY;
+  const features=precGeoByCounty[cfp]||[];
+  if(!features.length){toast('No precinct boundaries for '+ctyName,true);return;}
+  const shpByName={};
+  for(const f of features){shpByName[f.properties.NAME]=f.properties.GEOID;if(f.properties.ALT)shpByName[f.properties.ALT]=f.properties.GEOID;}
+  const precSummary=getCountyPrecinctSummary(ctyName);
+  const geoidData={};
+  for(const row of precSummary){const geoid=matchPrecName(row.prec,shpByName);if(!geoid)continue;geoidData[geoid]=row;}
+  const maxVotes=Math.max(...precSummary.map(r=>r.total),1);
+  // Remove old county layers
+  m.eachLayer(l=>{if(!(l instanceof L.TileLayer))m.removeLayer(l);});
+  const precLayer=L.geoJSON({type:'FeatureCollection',features},{
+    style:f=>{
+      const d=geoidData[f.properties.GEOID];
+      if(!d)return{fillColor:'#e5e7eb',weight:0.5,color:'#aaa',fillOpacity:0.35};
+      if(mode==='reporting'){
+        const rep=isReported(d.status);
+        return{fillColor:rep?'#16a34a':'#e5e7eb',weight:0.5,color:'#888',fillOpacity:rep?0.75:0.35};
+      }else{
+        const t2=maxVotes>0?d.total/maxVotes:0;
+        return{fillColor:`rgb(${Math.round(222*(1-t2)+8*t2)},${Math.round(235*(1-t2)+69*t2)},${Math.round(247*(1-t2)+148*t2)})`,weight:0.5,color:'#888',fillOpacity:0.85};
+      }
+    },
+    onEachFeature:(f,l)=>{
+      const d=geoidData[f.properties.GEOID];const name=f.properties.NAME;
+      l.bindTooltip(d
+        ?`<strong>${d.prec||name}</strong><br>Status: ${d.status||'Pending'}<br>Votes: ${fmt(d.total)}`
+        :`<strong>${name}</strong><br><i style="color:#999">No data</i>`,
+      {sticky:true});
+    }
+  }).addTo(m);
+  m.fitBounds(precLayer.getBounds(),{padding:[14,14]});
+  const t=document.getElementById(titleId);
+  if(t&&!t.dataset.origHtml){
+    t.dataset.origHtml=t.innerHTML;
+    const matched=Object.keys(geoidData).length;const total=precSummary.length;
+    t.innerHTML=`<button onclick="resetStatewideMap('${mapId}','${titleId}')" style="background:none;border:none;cursor:pointer;color:var(--header);font-size:12px;padding:0 6px 0 0;font-weight:700">← State</button>${ctyName} Precincts <span style="font-size:10px;font-weight:400;color:var(--muted)">(${matched}/${total} matched)</span>`;
+  }
+}
+
 function initRepMap(stats){
   const m=makeMap('map-rep');
-  const t=document.getElementById('map-rep-title');if(t)t.innerHTML='📍 Precincts Reporting by County <span style="font-size:10px;color:var(--muted);font-weight:400">· Click county for precinct detail</span>';
+  const t=document.getElementById('map-rep-title');if(t)t.innerHTML='📍 Precincts Reporting by County <span style="font-size:10px;color:var(--muted);font-weight:400">· Click county for precinct view</span>';
   function col(p){if(p===null)return'#ccc';const t=Math.max(0,Math.min(1,p));return`rgb(${Math.round(229-229*t)},${Math.round(245*(1-t)+109*t)},${Math.round(240*(1-t)+44*t)})`;}
   L.geoJSON(GA_GEO,{
     style:f=>{const n=f.properties.NAME;const s=stats[n+' County']||stats[n]||null;const p=s&&s.tp>0?s.rp/s.tp:null;return{fillColor:col(p),weight:0.7,opacity:1,color:'#888',fillOpacity:0.85};},
     onEachFeature:(f,l)=>{
       const n=f.properties.NAME;const s=stats[n+' County']||stats[n]||{};
-      l.bindTooltip(`<strong>${n} County</strong><br>${s.rp||0} / ${s.tp||0} precincts (${s.tp>0?((s.rp/s.tp*100).toFixed(0)):'0'}%)<br><em style="color:var(--muted)">Click for precinct detail</em>`,{sticky:true});
-      l.on('click',()=>showCountyPrecinctPanel(n+' County','prec-panel-rep','reporting'));
+      l.bindTooltip(`<strong>${n} County</strong><br>${s.rp||0} / ${s.tp||0} precincts (${s.tp>0?((s.rp/s.tp*100).toFixed(0)):'0'}%)<br><em style="color:var(--muted)">Click for precinct view</em>`,{sticky:true});
+      l.on('click',()=>drillStatewideMapToPrecincts('map-rep',n+' County','map-rep-title','reporting'));
     }
   }).addTo(m);
 }
@@ -1002,14 +1262,14 @@ function initVoteMap(stats){
   const vals=Object.values(stats).map(s=>s.votes).filter(v=>v>0);
   const maxV=vals.length?Math.max(...vals):1;
   const m=makeMap('map-votes');
-  const t=document.getElementById('map-votes-title');if(t)t.innerHTML='🗳️ Total Votes by County <span style="font-size:10px;color:var(--muted);font-weight:400">· Click county for vote type detail</span>';
+  const t=document.getElementById('map-votes-title');if(t)t.innerHTML='🗳️ Total Votes by County <span style="font-size:10px;color:var(--muted);font-weight:400">· Click county for precinct view</span>';
   function col(v){if(!v)return'#ccc';const t=Math.max(0,Math.min(1,v/maxV));return`rgb(${Math.round(222*(1-t)+8*t)},${Math.round(235*(1-t)+69*t)},${Math.round(247*(1-t)+148*t)})`;}
   L.geoJSON(GA_GEO,{
     style:f=>{const n=f.properties.NAME;const s=stats[n+' County']||stats[n]||null;return{fillColor:col(s?s.votes:0),weight:0.7,opacity:1,color:'#888',fillOpacity:0.85};},
     onEachFeature:(f,l)=>{
       const n=f.properties.NAME;const s=stats[n+' County']||stats[n]||{};
-      l.bindTooltip(`<strong>${n} County</strong><br>${fmt(s.votes||0)} votes<br><em style="color:var(--muted)">Click for vote type detail</em>`,{sticky:true});
-      l.on('click',()=>showCountyPrecinctPanel(n+' County','prec-panel-votes','votes'));
+      l.bindTooltip(`<strong>${n} County</strong><br>${fmt(s.votes||0)} votes<br><em style="color:var(--muted)">Click for precinct view</em>`,{sticky:true});
+      l.on('click',()=>drillStatewideMapToPrecincts('map-votes',n+' County','map-votes-title','votes'));
     }
   }).addTo(m);
 }
@@ -1030,7 +1290,7 @@ function initDetailMap(id,res,metric,candIdx,allowDrill=true,drillMapId=null){
       vals[cty]=b!==null&&p!==null?p-b:null;
     }
     else if(metric==='exprem'){
-      const ev=getEV(cty,'');
+      const ev=getEV(cty,'',res.name);
       vals[cty]=ev?Math.max(0,(ev.Total||0)-((ct.c[cand]?.Total)||0)):null;
     }
   }
@@ -1060,7 +1320,7 @@ function initDetailMap(id,res,metric,candIdx,allowDrill=true,drillMapId=null){
       const tot=sumCands(ct.c);const v=ct.c[cand]?.Total||0;const p=tot>0?v/tot:null;
       const bm=getBench(res.name,cty,'');const b=bm?bm[cand]:null;
       const diff=b!==null&&p!==null?p-b:null;
-      const ev=getEV(cty,'');const rem=ev?Math.max(0,(ev.Total||0)-v):null;
+      const ev=getEV(cty,'',res.name);const rem=ev?Math.max(0,(ev.Total||0)-v):null;
       l.bindTooltip(`<strong>${n} County</strong><br><em>${cand}</em><br>Votes: ${fmt(v)} (${pct(p)})`+(b!==null?`<br>Bench: ${pct(b)} | Diff: ${diff>=0?'+':''}${pct(diff,2)}`:'')+(rem!==null?`<br>Est. Rem: ${fmt(rem)}`:''),{sticky:true});
       if(allowDrill)l.on('click',()=>{if(window._DR&&window._DR.hasPr)drillToPrecinctDetail(window._DR,metric,candIdx,cty,_did);});
     }
@@ -1079,7 +1339,7 @@ function initExpRemMap(stats){
   const vals={};
   for(const[cty,ev]of Object.entries(expVotes.county||{})){
     const norm=cty.replace(/ County$/i,'');
-    const votesSoFar=stats[cty]?.votes||stats[norm]?.votes||0;
+    const votesSoFar=stats[norm+' County']?.votes||stats[cty+' County']?.votes||stats[cty]?.votes||stats[norm]?.votes||0;
     const rem=Math.max(0,(ev.Total||0)-votesSoFar);
     vals[cty]=rem;vals[norm]=rem;
   }
@@ -1100,8 +1360,9 @@ function initExpRemMap(stats){
       const n=f.properties.NAME;const cty=n+' County';
       const v=vals[cty]!==undefined?vals[cty]:vals[n];
       const hasPr=!!(expVotes?.precinct?.[normCounty(cty)]&&Object.keys(expVotes.precinct[normCounty(cty)]).length);
-      l.bindTooltip(`<strong>${n} County</strong><br>Est. remaining: ${v!==undefined?fmt(v):'N/A'}${hasPr?'<br><em style="color:var(--muted)">Click for precinct detail</em>':''}`,{sticky:true});
-      if(hasPr)l.on('click',()=>showEVPrecinctPanel(cty,'ev-prec-panel-main',null));
+      l.bindTooltip(`<strong>${n} County</strong><br>Est. remaining: ${v!==undefined?fmt(v):'N/A'}${hasPr?'<br><em style="color:var(--muted)">Click to zoom + precinct detail</em>':'<br><em style="color:var(--muted)">Click to zoom</em>'}`,{sticky:true});
+      if(hasPr)l.on('click',()=>{zoomMapToCounty('map-exprem',l,'map-exprem-title');showEVPrecinctPanel(cty,'ev-prec-panel-main',null);});
+      else l.on('click',()=>zoomMapToCounty('map-exprem',l,'map-exprem-title'));
     }
   }).addTo(m);
 }
@@ -1109,16 +1370,84 @@ function initExpRemMap(stats){
 // ============================================================
 // DETAIL VIEW
 // ============================================================
-function renderDetailKPIs(r,cname){
+// Vote-type breakdown: Counted | Remaining | Expected Total
+// Returns '' when no EV data is loaded.
+function renderVoteTypeSummary(r,cname){
+  const _evSet=getEVSet(cname);
+  if(!_evSet||!Object.keys(_evSet.county||{}).length)return'';
+  const cols=['ED','AV','ABM','Prov','Total'];
+  const labels={ED:'Election Day',AV:'Advance Voting',ABM:'Absentee by Mail',Prov:'Provisional',Total:'Total'};
+  const exp={ED:0,AV:0,ABM:0,Prov:0,Total:0};
+  const act={ED:0,AV:0,ABM:0,Prov:0,Total:0};
+  for(const cty of Object.keys(r.ctyTotals)){
+    const ev=getEV(cty,'',cname);if(!ev)continue;
+    for(const k of cols){exp[k]+=(ev[k]||0);}
+    const ct=r.ctyTotals[cty];
+    for(const cand of r.cands){
+      act.Total+=(ct.c[cand]?.Total||0);
+      for(const g of VG){const gs=VG_S[g];act[gs]=(act[gs]||0)+(ct.c[cand]?.[g]||0);}
+    }
+  }
+  if(!exp.Total)return'';
+  const rows=cols.map(k=>{
+    const counted=act[k]||0;
+    const expected=exp[k]||0;
+    const rem=Math.max(0,expected-counted);
+    const pctIn=expected>0?Math.min(1,counted/expected):null;
+    const isTotal=k==='Total';
+    const countedBar=expected>0?(counted/expected*100).toFixed(1):0;
+    const remBar=expected>0?(rem/expected*100).toFixed(1):0;
+    return`<tr style="${isTotal?'border-top:2px solid var(--border);font-weight:700;background:#f8fafc':''}">
+      <td style="padding:7px 12px;font-size:12px;color:${isTotal?'var(--text)':'var(--muted)'};white-space:nowrap">${labels[k]}</td>
+      <td style="padding:7px 12px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums">${fmt(counted)}</td>
+      <td style="padding:7px 12px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;color:${rem>0?'#b45309':'var(--muted)'}">${rem>0?fmt(rem):'—'}</td>
+      <td style="padding:7px 12px;text-align:right;font-size:12px;font-variant-numeric:tabular-nums;color:var(--muted)">${expected>0?fmt(expected):'—'}</td>
+      <td style="padding:7px 18px 7px 8px;width:160px">
+        ${expected>0?`<div style="display:flex;height:10px;border-radius:3px;overflow:hidden;background:#e5e7eb">
+          <div style="width:${countedBar}%;background:var(--header);border-radius:3px 0 0 3px"></div>
+          <div style="width:${remBar}%;background:#fdba74;border-radius:0 3px 3px 0"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted);margin-top:2px">
+          <span>${pctIn!==null?(pctIn*100).toFixed(1)+'% in':''}</span>
+          <span>${rem>0?((rem/expected*100).toFixed(1)+'% rem'):'complete'}</span>
+        </div>`:''}
+      </td>
+    </tr>`;
+  }).join('');
+  return`<div class="map-card" style="overflow:hidden;margin-bottom:var(--gap)">
+    <div class="map-title">📊 Vote Totals by Type</div>
+    <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse">
+      <thead><tr style="border-bottom:2px solid var(--border);background:#fafbfc">
+        <th style="padding:6px 12px;text-align:left;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600">Type</th>
+        <th style="padding:6px 12px;text-align:right;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600">Counted</th>
+        <th style="padding:6px 12px;text-align:right;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600">Remaining</th>
+        <th style="padding:6px 12px;text-align:right;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600">Expected Total</th>
+        <th style="padding:6px 18px 6px 8px;font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600">Progress</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    </div>
+    <div style="padding:5px 12px 7px;display:flex;align-items:center;gap:14px;font-size:10px;color:var(--muted)">
+      <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:var(--header);border-radius:2px;display:inline-block"></span>Counted</span>
+      <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#fdba74;border-radius:2px;display:inline-block"></span>Est. Remaining</span>
+      <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;background:#e5e7eb;border-radius:2px;display:inline-block"></span>Uncategorized / Exceeded</span>
+    </div>
+  </div>`;
+}
+
+function renderDetailKPIs(r,cname,vertical=false){
   const tot=sumCands(r.st.c);
   const repP=r.st.tp>0?r.st.rp/r.st.tp:0;
   // Expected votes remaining by vote type
   let evHtml='';
-  if(expVotes&&(Object.keys(expVotes.county||{}).length||Object.keys(expVotes.precinct||{}).length)){
+  let votePctHtml='';
+  const _evSet=getEVSet(cname);
+  if(_evSet&&(Object.keys(_evSet.county||{}).length||Object.keys(_evSet.precinct||{}).length)){
     const expTotals={ED:0,AV:0,ABM:0,Prov:0,Total:0};
     const actTotals={ED:0,AV:0,ABM:0,Prov:0,Total:0};
     for(const cty of Object.keys(r.ctyTotals)){
-      const ev=getEV(cty,'');if(!ev)continue;
+      const ev=getEV(cty,'',cname);if(!ev)continue;
       for(const k of Object.keys(expTotals))expTotals[k]+=(ev[k]||0);
       const ct=r.ctyTotals[cty];
       for(const cand of r.cands){
@@ -1137,19 +1466,33 @@ function renderDetailKPIs(r,cname){
       <div class="kpi-value">${rem>0?fmt(rem):'—'}</div>
       <div class="ev-types">${evRows||'<span style="font-size:10px;color:var(--muted)">0 by vote type</span>'}</div>
     </div>`;
+    // % of vote in = actual votes / expected total votes
+    if(expTotals.Total>0){
+      const voteInPct=Math.min(1,actTotals.Total/expTotals.Total);
+      votePctHtml=`<div class="kpi-card">
+        <div class="kpi-label">% of Vote In</div>
+        <div class="kpi-value">${(voteInPct*100).toFixed(1)}%</div>
+        <div class="kpi-sub">${fmt(actTotals.Total)} of ${fmt(expTotals.Total)} exp.</div>
+        <div class="kpi-bar"><div class="kpi-bar-fill" style="width:${(voteInPct*100).toFixed(1)}%"></div></div>
+      </div>`;
+    }
   }
-  return`<div class="detail-kpi-row">
+  if(!votePctHtml){
+    votePctHtml=`<div class="kpi-card">
+      <div class="kpi-label">% of Vote In</div>
+      <div class="kpi-value">${(repP*100).toFixed(1)}%</div>
+      <div class="kpi-sub">based on precincts reporting</div>
+      <div class="kpi-bar"><div class="kpi-bar-fill" style="width:${(repP*100).toFixed(1)}%"></div></div>
+    </div>`;
+  }
+  return`<div class="detail-kpi-row" style="${vertical?'display:flex;flex-direction:column;gap:10px;margin-bottom:0':''}">
     <div class="kpi-card">
       <div class="kpi-label">Total Votes</div>
       <div class="kpi-value">${fmt(tot)}</div>
       <div class="kpi-sub">across all candidates</div>
     </div>
     ${evHtml}
-    <div class="kpi-card">
-      <div class="kpi-label">% of Vote In</div>
-      <div class="kpi-value">${(repP*100).toFixed(1)}%</div>
-      <div class="kpi-bar"><div class="kpi-bar-fill" style="width:${(repP*100).toFixed(1)}%"></div></div>
-    </div>
+    ${votePctHtml}
     <div class="kpi-card">
       <div class="kpi-label">Precincts Reporting</div>
       <div class="kpi-value">${r.st.rp}<span style="font-size:14px;font-weight:400;color:var(--muted)"> / ${r.st.tp}</span></div>
@@ -1168,8 +1511,9 @@ function renderDetail(encodedName){
   const tot=sumCands(r.st.c);
   const repP=r.st.tp>0?r.st.rp/r.st.tp:0;
   const hasBM=!!benchmarks[contestName];
-  const hasEV=!!(expVotes&&(Object.keys(expVotes.county||{}).length||Object.keys(expVotes.precinct||{}).length));
-  const validDetailTabs=['table','h2h','exprem',...r.cands.map((_,i)=>'cand-'+i)];
+  const _evSetForContest=getEVSet(contestName);
+  const hasEV=!!(_evSetForContest&&(Object.keys(_evSetForContest.county||{}).length||Object.keys(_evSetForContest.precinct||{}).length));
+  const validDetailTabs=['table','exprem',...r.cands.map((_,i)=>'cand-'+i)];
   if(!validDetailTabs.includes(detailTab))detailTab='table';
 
   const sorted=[...r.cands].sort((a,b)=>(r.st.c[b]?.Total||0)-(r.st.c[a]?.Total||0));
@@ -1201,19 +1545,36 @@ function renderDetail(encodedName){
       ${hasEV?'<span class="badge" style="background:#dcfce7;color:#15803d">📥 Exp. Votes</span>':''}
     </div>
     ${renderDetailKPIs(r,contestName)}
-    <div class="cand-summary-wrap">${candBar}</div>
+    <div style="display:flex;gap:var(--gap);margin-bottom:var(--gap);align-items:flex-start;flex-wrap:wrap">
+      <div style="flex:2;min-width:280px">
+        <div class="cand-summary-wrap" style="margin-bottom:${hasEV?'var(--gap)':'0'}">${candBar}</div>
+        ${hasEV?renderVoteTypeSummary(r,contestName):''}
+      </div>
+      <div style="flex:1;min-width:240px">
+        <div class="map-card">
+          <div class="map-title" id="map-d2-title">🥊 Head-to-Head by County</div>
+          <div class="map-container" id="map-d2" style="height:360px"></div>
+          <div class="map-legend-bar" id="map-d2-legend"></div>
+        </div>
+      </div>
+    </div>
     <div class="tabs">
       <div class="tab ${detailTab==='table'?'active':''}" data-tab="table" onclick="switchTab('table','${safe}')">📋 Results Table</div>
-      <div class="tab ${detailTab==='h2h'?'active':''}" data-tab="h2h" onclick="switchTab('h2h','${safe}')">🥊 Head-to-Head</div>
       ${hasEV?`<div class="tab ${detailTab==='exprem'?'active':''}" data-tab="exprem" onclick="switchTab('exprem','${safe}')">📥 Expected Votes</div>`:''}
       ${r.cands.map((c,i)=>`<div class="tab ${detailTab===('cand-'+i)?'active':''}" data-tab="cand-${i}" onclick="switchTab('cand-${i}','${safe}')">${shortName(c)}</div>`).join('')}
     </div>
     <div class="tab-pane ${detailTab==='table'?'active':''}" id="tp-table">${renderDT(r,contestName)}</div>
-    <div class="tab-pane ${detailTab==='h2h'?'active':''}" id="tp-h2h">${renderH2HUI(r)}</div>
     ${hasEV?`<div class="tab-pane ${detailTab==='exprem'?'active':''}" id="tp-exprem">${renderExpRemUI(r)}</div>`:''}
     ${r.cands.map((c,i)=>`<div class="tab-pane ${detailTab===('cand-'+i)?'active':''}" id="tp-cand-${i}">${renderCandTabUI(r,i)}</div>`).join('')}`;
 
-  if(detailTab!=='table')setTimeout(()=>initAllDetailMaps(r),50);
+  // Always initialize the H2H map (now always visible, not in a tab)
+  setTimeout(()=>{
+    window._DR=r;
+    initHeadToHeadMap(r);
+    setTimeout(()=>zoomDetailMapToContest('map-d2',r.name,true),80);
+  },50);
+  // Also init any active non-table tab
+  if(detailTab!=='table')setTimeout(()=>initAllDetailMaps(r),60);
 }
 
 function switchTab(tab,safe){
@@ -1228,7 +1589,7 @@ function switchTab(tab,safe){
 
 // Detail table
 function renderDT(r,cname){
-  const cands=r.cands;const hasBM=!!benchmarks[cname];const hasEV=!!(expVotes&&Object.keys(expVotes.county||{}).length);
+  const cands=r.cands;const hasBM=!!benchmarks[cname];const _evSetDT=getEVSet(cname);const hasEV=!!(_evSetDT&&Object.keys(_evSetDT.county||{}).length);
   // Header row 1: fixed cols + candidate groups
   const F1W=110,F2W=90,F3W=90; // frozen col widths
   let th1=`<tr>
@@ -1278,7 +1639,7 @@ function renderDT(r,cname){
         tbody+=`<td class="bench-na">${b!==null?pct(b):'—'}</td>`;
         tbody+=`<td class="bench-cell" style="background:${bgC};color:${d===null?'var(--muted)':d>=0?'#15803d':'#b91c1c'}">${d!==null?(d>=0?'+':'')+pct(d,2):'—'}</td>`;}}
     tbody+=`<td class="num"><strong>${fmt(totC)}</strong></td>`;
-    if(hasEV){const ev=getEV(cty,'');tbody+=`<td class="num">${ev?fmt(ev.ED||0):'—'}</td><td class="num">${ev?fmt(ev.AV||0):'—'}</td><td class="num">${ev?fmt(Math.max(0,(ev.Total||0)-totC)):'—'}</td>`;}
+    if(hasEV){const ev=getEV(cty,'',cname);tbody+=`<td class="num">${ev?fmt(ev.ED||0):'—'}</td><td class="num">${ev?fmt(ev.AV||0):'—'}</td><td class="num">${ev?fmt(Math.max(0,(ev.Total||0)-totC)):'—'}</td>`;}
     tbody+=`</tr>`;
     if(isEx)for(const row of ctRows)tbody+=buildDTRow(row.c,r,cname,cname,cands,hasBM,hasEV,false,row,null);
   }
@@ -1297,7 +1658,7 @@ function buildDTRow(candData,r,cname,_,cands,hasBM,hasEV,isState,rowObj,cls){
     const repP=r.st.tp>0?r.st.rp/r.st.tp:0;
     html=`<tr class="st"><td class="geo-cell frozen" style="left:0" colspan="1">STATEWIDE</td><td class="frozen2" style="left:110px">TOTAL</td><td class="frozen3" style="left:200px;font-size:10px">${r.st.rp}/${r.st.tp} (${(repP*100).toFixed(0)}%)</td>`;
   }else{
-    html=`<tr class="pt"><td class="frozen" style="left:0"></td><td class="prec-cell frozen2" style="left:110px">${rowObj.prec}</td><td class="frozen3" style="left:200px;font-size:10px;color:${rowObj.status==='Fully Reported'?'var(--positive)':'var(--muted)'}">${rowObj.status||'Pending'}</td>`;
+    html=`<tr class="pt"><td class="frozen" style="left:0"></td><td class="prec-cell frozen2" style="left:110px">${rowObj.prec}</td><td class="frozen3" style="left:200px;font-size:10px;color:${isReported(rowObj.status)?'var(--positive)':'var(--muted)'}">${rowObj.status||'Pending'}</td>`;
   }
   // Vote-group totals across all candidates for this row (denominator for % mode)
   const vgRowT={};
@@ -1321,7 +1682,7 @@ function buildDTRow(candData,r,cname,_,cands,hasBM,hasEV,isState,rowObj,cls){
   }
   html+=`<td class="num"><strong>${fmt(tot)}</strong></td>`;
   if(hasEV){
-    const ev=isState?null:getEV(rowObj.co,rowObj.prec);
+    const ev=isState?null:getEV(rowObj.co,rowObj.prec,cname);
     html+=`<td class="num">${ev?fmt(ev.ED||0):'—'}</td><td class="num">${ev?fmt(ev.AV||0):'—'}</td>`;
     html+=`<td class="num">${ev?fmt(Math.max(0,(ev.Total||0)-tot)):'—'}</td>`;
   }
@@ -1383,17 +1744,19 @@ function initCandTabMaps(r,candIdx){
 function initExpRemDetailMap(r){
   const id='map-exprem-detail';
   killMap(id);const el=document.getElementById(id);if(!el)return;
-  if(!expVotes||!Object.keys(expVotes.county||{}).length){
+  const _evSetD=getEVSet(r.name);
+  if(!_evSetD||!Object.keys(_evSetD.county||{}).length){
     el.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:13px">Upload Expected Votes in Admin to enable this map</div>';
     return;
   }
+  const expVotesForContest=_evSetD;
   const m=makeMap(id);
   // Fixed scale: darkest = highest initial expected total across all counties (not current max remaining)
-  const maxV=Math.max(...Object.values(expVotes.county||{}).map(ev=>ev.Total||0),1);
+  const maxV=Math.max(...Object.values(expVotesForContest.county||{}).map(ev=>ev.Total||0),1);
   const vals={};
-  for(const[cty,ev]of Object.entries(expVotes.county||{})){
+  for(const[cty,ev]of Object.entries(expVotesForContest.county||{})){
     const norm=cty.replace(/ County$/i,'');
-    const ct=r.ctyTotals[cty]||r.ctyTotals[norm];
+    const ct=r.ctyTotals[norm+' County']||r.ctyTotals[cty+' County']||r.ctyTotals[cty]||r.ctyTotals[norm];
     const votesSoFar=ct?sumCands(ct.c):0;
     const rem=Math.max(0,(ev.Total||0)-votesSoFar);
     vals[cty]=rem;vals[norm]=rem;
@@ -1404,7 +1767,7 @@ function initExpRemDetailMap(r){
     return`rgb(${r2},${g2},${b2})`;
   }
   // Show click hint if any county has precinct-level data
-  const anyPrecData=Object.keys(expVotes.county||{}).some(c=>expVotes.precinct?.[normCounty(c)]&&Object.keys(expVotes.precinct[normCounty(c)]).length);
+  const anyPrecData=Object.keys(expVotesForContest.county||{}).some(c=>expVotesForContest.precinct?.[normCounty(c)]&&Object.keys(expVotesForContest.precinct[normCounty(c)]).length);
   if(anyPrecData){const t=document.getElementById('map-exprem-detail-title');if(t)t.innerHTML='\u{1F4E5} Expected Votes Remaining by County <span style="font-size:10px;color:var(--muted);font-weight:400">· Click county for precinct detail</span>';}
   L.geoJSON(GA_GEO,{
     style:f=>{
@@ -1415,8 +1778,8 @@ function initExpRemDetailMap(r){
     onEachFeature:(f,l)=>{
       const n=f.properties.NAME;const cty=n+' County';
       const v=vals[cty]!==undefined?vals[cty]:vals[n];
-      const ev=expVotes?.county?.[cty]||expVotes?.county?.[n];
-      const hasPr=!!(expVotes?.precinct?.[normCounty(cty)]&&Object.keys(expVotes.precinct[normCounty(cty)]).length);
+      const ev=expVotesForContest?.county?.[cty]||expVotesForContest?.county?.[n];
+      const hasPr=!!(expVotesForContest?.precinct?.[normCounty(cty)]&&Object.keys(expVotesForContest.precinct[normCounty(cty)]).length);
       l.bindTooltip(`<strong>${n} County</strong><br>Remaining: ${v!==undefined?fmt(v):'N/A'}${ev?`<br>Initial expected: ${fmt(ev.Total||0)}`:''}${hasPr?'<br><em style="color:var(--muted)">Click for precinct detail</em>':''}`,{sticky:true});
       if(hasPr)l.on('click',()=>showEVPrecinctPanel(cty,'ev-prec-panel-detail',window._DR));
     }
@@ -1460,7 +1823,7 @@ function showCountyPrecinctPanel(ctyName,panelId,mode){
   const isVotes=mode==='votes';
   let totV=0,totED=0,totAV=0,totABM=0,totProv=0,repCount=0,tbody='';
   for(const d of data){
-    const rep=d.status==='Fully Reported';
+    const rep=isReported(d.status);
     if(rep)repCount++;
     totV+=d.total;totED+=d.ED;totAV+=d.AV;totABM+=d.ABM;totProv+=d.Prov;
     if(isVotes){
@@ -1520,7 +1883,8 @@ function showCountyPrecinctPanel(ctyName,panelId,mode){
 function showEVPrecinctPanel(ctyName,panelId,r){
   const el=document.getElementById(panelId);if(!el)return;
   const cn=normCounty(ctyName);
-  const precincts=expVotes?.precinct?.[cn];
+  const _evForPanel=r?.name?getEVSet(r.name):expVotes;
+  const precincts=_evForPanel?.precinct?.[cn];
   if(!precincts||!Object.keys(precincts).length){
     el.innerHTML=`<div style="padding:12px;color:var(--muted);font-size:12px">No precinct-level expected vote data for ${ctyName}.</div>`;
     el.style.display='block';return;
@@ -1604,13 +1968,19 @@ function renderH2HUI(r){
 
 function initAllDetailMaps(r){
   if(!r)return;window._DR=r;
-  if(detailTab==='h2h'){
-    initHeadToHeadMap(r);
-  }else if(detailTab==='exprem'){
+  // H2H map is now always-visible above the tabs — initialized separately in renderDetail
+  if(detailTab==='exprem'){
     initExpRemDetailMap(r);
+    setTimeout(()=>zoomDetailMapToContest('map-exprem-detail',r.name,false),80);
   }else if(detailTab.startsWith('cand-')){
     const idx=parseInt(detailTab.split('-')[1]);
     initCandTabMaps(r,idx);
+    setTimeout(()=>{
+      const hasBM=!!benchmarks[r.name];
+      if(hasBM)zoomDetailMapToContest('map-cand-'+idx+'-bench',r.name,false);
+      zoomDetailMapToContest('map-cand-'+idx+'-pct',r.name,false);
+      zoomDetailMapToContest('map-cand-'+idx+'-votes',r.name,false);
+    },80);
   }
 }
 
@@ -1688,7 +2058,7 @@ async function drillToPrecinctDetail(r,metric,candIdx,ctyName,mapId='map-d1'){
     if(metric==='pct')val=p;
     else if(metric==='votes')val=v;
     else if(metric==='bench'){const bm=getBench(r.name,row.co,row.prec);const b=bm?bm[cand]:null;val=b!==null&&p!==null?p-b:null;}
-    else if(metric==='exprem'){const ev=getEV(row.co,row.prec);val=ev?Math.max(0,(ev.Total||0)-v):null;}
+    else if(metric==='exprem'){const ev=getEV(row.co,row.prec,r.name);val=ev?Math.max(0,(ev.Total||0)-v):null;}
     if(val!==null)allVals.push(val);
     geoidData[geoid]={c:row.c,val,tot,prec:row.prec,status:row.status};
   }
@@ -1718,7 +2088,7 @@ async function drillToPrecinctDetail(r,metric,candIdx,ctyName,mapId='map-d1'){
         const tot=d.tot;const v=d.c[cand]?.Total||0;const p=tot>0?v/tot:null;
         const bm=getBench(r.name,ctyName,d.prec);const b=bm?bm[cand]:null;
         const diff=b!==null&&p!==null?p-b:null;
-        const ev=getEV(ctyName,d.prec);const rem=ev?Math.max(0,(ev.Total||0)-v):null;
+        const ev=getEV(ctyName,d.prec,r.name);const rem=ev?Math.max(0,(ev.Total||0)-v):null;
         l.bindTooltip(
           `<strong>${d.prec||name}</strong>${d.status?' · '+d.status:''}<br>`+
           `<em>${cand}</em>: ${fmt(v)} (${pct(p)})`+
@@ -1935,15 +2305,34 @@ function renderAdminElection(){
     <div>
       <div class="admin-section">
         <h3>📥 Expected Votes</h3>
-        <div class="form-help" style="margin-bottom:8px">CSV: County, Precinct, Registered_Voters, Expected_ED, Expected_AV, Expected_ABM, Expected_Prov, Expected_Total</div>
-        <div style="font-size:12px;margin-bottom:8px;color:${Object.keys(expVotes?.county||{}).length?'var(--positive)':'var(--muted)'}">
-          ${Object.keys(expVotes?.county||{}).length?`✓ ${Object.keys(expVotes.county).length} counties`:'No file loaded'}
-          ${Object.values(expVotes?.precinct||{}).reduce((s,v)=>s+Object.keys(v).length,0)>0?` + ${Object.values(expVotes.precinct).reduce((s,v)=>s+Object.keys(v).length,0)} precincts`:''}</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <label class="btn btn-blue" style="cursor:pointer">Upload CSV
-            <input type="file" accept=".csv,.xlsx" style="display:none" onchange="uploadEV(event)"></label>
+        <div class="form-help" style="margin-bottom:10px">CSV: County, Precinct, Registered_Voters, Expected_ED, Expected_AV, Expected_ABM, Expected_Prov, Expected_Total<br>
+          For primaries, upload a separate file per party so the dashboard applies the right expected votes to each contest automatically.</div>
+
+        ${(()=>{
+          const evByKey={dem:expVotesDem,rep:expVotesRep,np:expVotesNp,gen:expVotes};
+          return[
+            {label:'🔵 Democratic Primary',key:'dem'},
+            {label:'🔴 Republican Primary',key:'rep'},
+            {label:'⚪ Non-Partisan',key:'np'},
+            {label:'General / All Contests',key:'gen'},
+          ].map(({label,key})=>{
+          const ev=evByKey[key]||{};
+          const ctyCount=Object.keys(ev.county||{}).length;
+          const precCount=Object.values(ev.precinct||{}).reduce((s,v)=>s+Object.keys(v).length,0);
+          const status=ctyCount?`<span style="color:var(--positive)">✓ ${ctyCount} counties${precCount?` + ${precCount} prec`:''}` :'<span style="color:var(--muted)">No file loaded';
+          return`<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid var(--border);flex-wrap:wrap">
+            <div style="font-size:12px;font-weight:600;min-width:160px">${label}</div>
+            <div style="font-size:11px;flex:1">${status}</span></div>
+            <div style="display:flex;gap:4px">
+              <label class="btn btn-blue btn-sm" style="cursor:pointer">Upload
+                <input type="file" accept=".csv,.xlsx" style="display:none" onchange="uploadEVParty(event,'${key}')"></label>
+              <button class="btn btn-outline btn-sm" onclick="clearEVParty('${key}')">Clear</button>
+            </div>
+          </div>`;
+        }).join('');})()}
+
+        <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
           <button class="btn btn-green btn-sm" onclick="downloadEVTemplate()">⬇ Download Template</button>
-          <button class="btn btn-outline" onclick="expVotes={};saveLS('ga_ev',{});renderAdmin();toast('Cleared')">Clear</button>
         </div>
       </div>
       <div class="admin-section">
@@ -2086,6 +2475,9 @@ async function exportViewer(){
       .replace('let cfg = loadCfg();',`let cfg = ${sj(cfg)};`)
       .replace("let benchmarks = loadLS('ga_bm',{});",`let benchmarks = ${sj(benchmarks)};`)
       .replace("let expVotes = loadLS('ga_ev',{});",`let expVotes = ${sj(expVotes)};`)
+      .replace("let expVotesDem = loadLS('ga_ev_dem',{});",`let expVotesDem = ${sj(expVotesDem)};`)
+      .replace("let expVotesRep = loadLS('ga_ev_rep',{});",`let expVotesRep = ${sj(expVotesRep)};`)
+      .replace("let expVotesNp  = loadLS('ga_ev_np',{});",`let expVotesNp  = ${sj(expVotesNp)};`)
       .replace('let VIEWER_MODE = false;','let VIEWER_MODE = true;')
       .replace('if(cfg.autoRefresh)startAR();','cfg.autoRefresh=true;startAR();')
       .replace(/<button[^>]*id="nav-admin"[^>]*>[\s\S]*?<\/button>/,'')
@@ -2327,6 +2719,25 @@ function uploadEV(event){
     if(!parsed){toast('Parse failed',true);return;}
     expVotes=parsed;saveLS('ga_ev',expVotes);toast('Expected votes loaded');renderAdmin();
   }catch(err){toast('Error: '+err.message,true);}};rd.readAsText(f);
+}
+function uploadEVParty(event,party){
+  const f=event.target.files[0];if(!f)return;
+  const rd=new FileReader();rd.onload=e=>{try{
+    const parsed=parseEV(e.target.result);
+    if(!parsed){toast('Parse failed',true);return;}
+    if(party==='dem'){expVotesDem=parsed;saveLS('ga_ev_dem',expVotesDem);}
+    else if(party==='rep'){expVotesRep=parsed;saveLS('ga_ev_rep',expVotesRep);}
+    else if(party==='np'){expVotesNp=parsed;saveLS('ga_ev_np',expVotesNp);}
+    else{expVotes=parsed;saveLS('ga_ev',expVotes);}
+    toast('Expected votes loaded ('+party+')');renderAdmin();
+  }catch(err){toast('Error: '+err.message,true);}};rd.readAsText(f);
+}
+function clearEVParty(party){
+  if(party==='dem'){expVotesDem={};saveLS('ga_ev_dem',{});}
+  else if(party==='rep'){expVotesRep={};saveLS('ga_ev_rep',{});}
+  else if(party==='np'){expVotesNp={};saveLS('ga_ev_np',{});}
+  else{expVotes={};saveLS('ga_ev',{});}
+  renderAdmin();toast('Cleared ('+party+')');
 }
 
 // ============================================================
