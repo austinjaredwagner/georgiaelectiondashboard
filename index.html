@@ -1612,7 +1612,7 @@ function renderDetail(encodedName){
   setTimeout(()=>{
     window._DR=r;
     initHeadToHeadMap(r);
-    setTimeout(()=>zoomDetailMapToContest('map-d2',r.name,true),80);
+    setTimeout(()=>zoomDetailMapToContest('map-d2',raw,true),80);
   },50);
   // Also init any active non-table tab
   if(detailTab!=='table')setTimeout(()=>initAllDetailMaps(r),60);
@@ -2404,8 +2404,9 @@ function renderAdminContest(){
     const hasBM=!!benchmarks[c.name];
     const isFeat=featSet.has(c.name);
     const enc=encodeURIComponent(c.name);
-    const isExp=adminExpanded.has(c.name);
-    const r=getResults(c.name);
+    const encKey=encodeURIComponent(c.key);
+    const isExp=adminExpanded.has(c.key);
+    const r=getResults(c.sw?c.name:c.key);
     const cands=r?r.cands:[];
     const hasOverride=cands.some(cd=>cfg.candColors?.[cd]);
     const candsJson=encodeURIComponent(JSON.stringify(cands));
@@ -2423,7 +2424,7 @@ function renderAdminContest(){
       </div>
       ${hasOverride?`<button onclick="event.stopPropagation();resetContestColors(decodeURIComponent('${candsJson}'))" class="btn btn-outline btn-sm" style="margin-top:10px">↺ Reset all colors for this contest</button>`:''}
     </div></td></tr>`:'';
-    return`<tr style="cursor:pointer${isFeat?';background:#f0f7ff':''}" onclick="rowAdminClick('${enc}',event)">
+    return`<tr style="cursor:pointer${isFeat?';background:#f0f7ff':''}" onclick="rowAdminClick('${encKey}',event)">
       <td style="text-align:center;width:36px">
         <input type="checkbox" ${isFeat?'checked':''} title="Feature on main page"
           onclick="event.stopPropagation();toggleFeatured('${enc}')">
@@ -2490,8 +2491,8 @@ function rowAdminClick(enc,e){
   toggleAdminContest(enc);
 }
 function toggleAdminContest(enc){
-  const name=decodeURIComponent(enc);
-  if(adminExpanded.has(name))adminExpanded.delete(name);else adminExpanded.add(name);
+  const key=decodeURIComponent(enc);
+  if(adminExpanded.has(key))adminExpanded.delete(key);else adminExpanded.add(key);
   refreshAdminContest();
 }
 function toggleFeatured(enc){
